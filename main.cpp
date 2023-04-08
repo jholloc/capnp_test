@@ -3,9 +3,6 @@
 #include <capnp/serialize-packed.h>
 #include <vector>
 #include <memory>
-#include <sys/mman.h>
-#include <sys/stat.h>        /* For mode constants */
-#include <fcntl.h>           /* For O_* constants */
 
 #include "schema.capnp.h"
 
@@ -14,26 +11,20 @@ struct Buffer {
     size_t size;
 };
 
-class VectorOutputStream : public kj::OutputStream {
+class PackedMessageStreamReader : public capnp::MessageReader {
 public:
-    std::vector<char> buffer_;
-
-    void write(const void* buffer, size_t size) override {
-        std::cout << "HERE " << size << std::endl;
-        buffer_.resize(buffer_.size() + size);
-        auto data = reinterpret_cast<const char*>(buffer);
-        std::copy(data, data + size, buffer_.data() + size);
+    PackedMessageStreamReader(const char* bytes, size_t size)
+            : capnp::MessageReader{capnp::ReaderOptions{}}
+            , in_{kj::ArrayPtr<const kj::byte>{reinterpret_cast<const kj::byte*>(bytes), size}}
+            , reader_{in_}
+    {}
+    kj::ArrayPtr<const capnp::word> getSegment(uint id) override
+    {
+        return reader_.getSegment(id);
     }
-
-    void write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-        for (auto& piece : pieces) {
-            auto size = piece.size();
-            std::cout << "HERE2 " << size << std::endl;
-            buffer_.resize(buffer_.size() + size);
-            auto data = reinterpret_cast<const char*>(piece.begin());
-            std::copy(data, data + size, buffer_.data() + size);
-        }
-    }
+private:
+    kj::ArrayInputStream in_;
+    capnp::PackedMessageReader reader_;
 };
 
 Buffer uda_capnp_serialise(capnp::MessageBuilder& builder)
@@ -50,11 +41,7 @@ Buffer uda_capnp_serialise(capnp::MessageBuilder& builder)
 
 std::shared_ptr<capnp::MessageReader> uda_capnp_deserialise(const char* bytes, size_t size)
 {
-    // ArrayPtr requires non-const ptr, but we are only using this to read from the bytes array
-    kj::ArrayPtr<kj::byte> buffer(reinterpret_cast<kj::byte*>(const_cast<char*>(bytes)), size);
-    kj::ArrayInputStream in(buffer);
-
-    return std::make_shared<capnp::PackedMessageReader>(in);
+    return std::make_shared<PackedMessageStreamReader>(bytes, size);
 }
 
 Buffer uda_capnp_serialise2(capnp::MessageBuilder& builder)
